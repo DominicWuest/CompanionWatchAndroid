@@ -340,7 +340,7 @@ public class WatchActivity extends YouTubeBaseActivity {
         };
 
         // Initialize the youtube video player
-        youTubePlayerView.initialize(API_KEY, onInitializedListener);
+        youTubePlayerView.initialize(DeveloperVariables.API_KEY, onInitializedListener);
 
         // Perform a search if the button is pressed
         searchButton.setOnClickListener(new View.OnClickListener() {

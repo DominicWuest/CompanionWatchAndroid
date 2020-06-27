@@ -46,7 +46,7 @@
         android:id="@+id/actionSelectionBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="right|center_vertical"
+        android:gravity="end|center_vertical"
         android:orientation="horizontal"
         app:layout_constraintBottom_toTopOf="@+id/videoResultsScrollView"
         app:layout_constraintEnd_toEndOf="parent"
@@ -55,17 +55,17 @@
 
         <Button
             android:id="@+id/shareButton"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:text="Share" />
+            android:text="@string/shareButton" />
 
         <ToggleButton
             android:id="@+id/visibilityToggle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="0dp"
-            android:layout_marginRight="10dp"
+            android:layout_marginEnd="0dp"
             android:checked="false"
             android:textOff="@string/hidden"
             android:textOn="@string/visible" />
@@ -130,7 +130,7 @@
         android:id="@+id/chatSendButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Send"
+        android:text="@string/sendButton"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toEndOf="@+id/chatInput"
