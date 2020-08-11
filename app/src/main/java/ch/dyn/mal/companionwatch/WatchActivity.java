@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.os.Bundle;
-import android.os.Message;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
@@ -16,22 +15,19 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.ToggleButton;
 
-import androidx.annotation.NonNull;
-
+import com.github.nkzawa.emitter.Emitter;
+import com.github.nkzawa.socketio.client.IO;
+import com.github.nkzawa.socketio.client.Socket;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 import com.google.android.youtube.player.YouTubeBaseActivity;
 import com.google.android.youtube.player.YouTubeInitializationResult;
 import com.google.android.youtube.player.YouTubePlayer;
 import com.google.android.youtube.player.YouTubePlayerView;
-import com.github.nkzawa.socketio.client.IO;
-import com.github.nkzawa.socketio.client.Socket;
-import com.github.nkzawa.emitter.Emitter;
 import com.squareup.picasso.Picasso;
 
 import org.json.JSONArray;
@@ -42,7 +38,7 @@ import java.net.URISyntaxException;
 
 public class WatchActivity extends YouTubeBaseActivity {
 
-    // Objects displayed on screen
+    // Views
     EditText searchInput;
     TextInputLayout chatInput;
     TextInputEditText chatInputEditText;
@@ -74,9 +70,9 @@ public class WatchActivity extends YouTubeBaseActivity {
     YouTubePlayer.OnInitializedListener onInitializedListener;
 
     // A boolean indicating whether the last state change has been caused by the user or by a socket event
-    boolean externalChange;
+    boolean ignoreChange;
 
-    // A boolean indicating whether the user has newly joined the room and plays the video for the first time
+    // A boolean indicating whether the user has newly joined the room and plays the video gets unpaused for the first time
     boolean firstPlay;
 
     @Override
@@ -85,15 +81,17 @@ public class WatchActivity extends YouTubeBaseActivity {
         setContentView(R.layout.activity_watch);
 
         namespace = getIntent().getExtras().getString("ns");
-        /* TODO: Remove permanent search bar to make space for the virtual keyboard when typing
-        Implement a search button instead
+        /*
+            TODO: Remove permanent search bar to make space for the virtual keyboard when typing
+            Implement a search button instead
          */
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
 
-        externalChange = false;
+        // Initialisation of variables needed by the youtube player
+        ignoreChange = false;
         firstPlay = true;
 
-        // Objects displayed on screen
+        // Declaration of views
         searchInput = findViewById(R.id.editText);
         searchButton = findViewById(R.id.button);
         visibilityToggle = findViewById(R.id.visibilityToggle);
@@ -140,16 +138,16 @@ public class WatchActivity extends YouTubeBaseActivity {
                 youTubePlayer.setPlaybackEventListener(new YouTubePlayer.PlaybackEventListener() {
                     @Override
                     public void onPlaying() {
-                        // Request a time sync if the user newly joined the room and the video starts playing
+                        // Request a time and state sync if the user newly joined the room and the video starts playing
                         if (firstPlay) {
                             youTubePlayer.pause();
-                            externalChange = true;
+                            ignoreChange = true;
                             mSocket.emit("requestStateSync");
                             mSocket.emit("requestTimeSync");
                             firstPlay = false;
                         } else {
-                            // Don't emit an event if the state change was caused by another client
-                            if (externalChange) externalChange = false;
+                            // Don't emit an event if the state-change was caused by another client
+                            if (ignoreChange) ignoreChange = false;
                             else {
                                 double millis = youTubePlayer.getCurrentTimeMillis() / 1000.0;
                                 mSocket.emit("stateChange", 1, millis);
@@ -159,8 +157,8 @@ public class WatchActivity extends YouTubeBaseActivity {
 
                     @Override
                     public void onPaused() {
-                        // Don't emit an event if the state change was caused by another client
-                        if (externalChange) externalChange = false;
+                        // Don't emit an event if the state-change was caused by another client
+                        if (ignoreChange) ignoreChange = false;
                         else {
                             double millis = youTubePlayer.getCurrentTimeMillis() / 1000.0;
                             mSocket.emit("stateChange", 2, millis);
@@ -169,8 +167,8 @@ public class WatchActivity extends YouTubeBaseActivity {
 
                     @Override
                     public void onSeekTo(int i) {
-                        // Don't emit an event if the state change was caused by another client
-                        if (externalChange) externalChange = false;
+                        // Don't emit an event if the state-change was caused by another client
+                        if (ignoreChange) ignoreChange = false;
                         else {
                             double millis = i / 1000.0;
                             mSocket.emit("timeChange", millis);
@@ -198,8 +196,8 @@ public class WatchActivity extends YouTubeBaseActivity {
                             public void run() {
                                 int data = (int) args[0];
                                 switch (data) {
-                                    case 1: youTubePlayer.play(); externalChange = true; break;
-                                    case 2: youTubePlayer.pause(); externalChange = true; break;
+                                    case 1: youTubePlayer.play(); ignoreChange = true; break;
+                                    case 2: youTubePlayer.pause(); ignoreChange = true; break;
                                 }
                             }
                         });
@@ -212,7 +210,7 @@ public class WatchActivity extends YouTubeBaseActivity {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                externalChange = true;
+                                ignoreChange = true;
                                 double seconds = Double.parseDouble(args[0].toString());
                                 int millis = (int) (seconds * 1000.0);
                                 youTubePlayer.seekToMillis(millis);
@@ -253,43 +251,8 @@ public class WatchActivity extends YouTubeBaseActivity {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                JSONArray videos = (JSONArray) args[0];
-                                try {
-                                    // The parent for all videos
-                                    LinearLayout mainLayout = findViewById(R.id.videoResultsContainer);
-                                    mainLayout.removeAllViews();
-                                    // Create all items for the rooms
-                                    for (int i = 0; i < videos.length(); i++) {
-                                        final JSONObject room = videos.getJSONObject(i);
-                                        final JSONObject snippet = room.getJSONObject("snippet");
-                                        // The inflater for the rooms to be displayed
-                                        View view = getLayoutInflater().inflate(R.layout.video_list_item, mainLayout, false);
-                                        // Set the title
-                                        TextView title = view.findViewById(R.id.listItemTitle);
-                                        title.setText(snippet.getString("title"));
-                                        // Set the thumbnail
-                                        ImageView thumbnail = view.findViewById(R.id.listItemThumbnail);
-                                        Picasso.get().load(snippet.getJSONObject("thumbnails").getJSONObject("high").getString("url")).into(thumbnail);
-                                        // Set onClickListener for redirecting user into room
-                                        view.setOnClickListener(new View.OnClickListener() {
-                                            @Override
-                                            public void onClick(View v) {
-                                                toggleChatVideoVisibility();
-                                                String id = null;
-                                                try {
-                                                    id = room.getJSONObject("id").getString("videoId");
-                                                } catch (JSONException e) {
-                                                    e.printStackTrace();
-                                                }
-                                                mSocket.emit("videoChange", id);
-                                                youTubePlayer.loadVideo(id);
-                                            }
-                                        });
-                                        mainLayout.addView(view);
-                                    }
-                                } catch (JSONException e) {
-                                    e.printStackTrace();
-                                }
+                                JSONArray results = (JSONArray) args[0];
+                                displaySearchResults(results);
                             }
                         });
                     }
@@ -375,8 +338,9 @@ public class WatchActivity extends YouTubeBaseActivity {
         });
 
         chatInputEditText.setOnEditorActionListener(new TextView.OnEditorActionListener() {
-            /* When user presses the enter button, the text should be sent
-            Fetch the string from the EditText and call the sender function
+            /* 
+                When user presses the enter button, the text should be sent
+                Fetch the string from the EditText and call the sender function
              */
             @Override
             public boolean onEditorAction(TextView textView, int i, KeyEvent keyEvent) {
@@ -405,25 +369,24 @@ public class WatchActivity extends YouTubeBaseActivity {
     }
 
     @Override
-    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+    public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
 
         // Set youTubePlayer to fullscreen if orientation is landscape
         int newOrientation = newConfig.orientation;
-        if (newOrientation == Configuration.ORIENTATION_LANDSCAPE) {
-            youTubePlayer.setFullscreen(true);
-        } else if (newOrientation == Configuration.ORIENTATION_PORTRAIT) {
-            youTubePlayer.setFullscreen(false);
-        }
+        if (newOrientation == Configuration.ORIENTATION_LANDSCAPE)  youTubePlayer.setFullscreen(true);
+        else if (newOrientation == Configuration.ORIENTATION_PORTRAIT) youTubePlayer.setFullscreen(false);
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
 
+        // Destroy the youtube player
         youTubePlayer.release();
         youTubePlayer = null;
 
+        // Disconnect the socket and destroy the event listeners
         mSocket.disconnect();
         mSocket.off("stateChange", onStateChange);
         mSocket.off("timeChange", onTimeChange);
@@ -431,37 +394,78 @@ public class WatchActivity extends YouTubeBaseActivity {
         mSocket.off("visibilityChange", onVisibilityChange);
         mSocket.off("searchResults", onSearchResults);
     }
-
-    void toggleChatVideoVisibility() {
-        /* Toggles visibility of chat input field, chat scroll view and the video results scroll view.
-        This is a workaround because no Fragments were used, which is utterly retarded.
+    
+    void displaySearchResults(JSONArray results) {
+        /*
+            Displays the results from querying the youtube database through the mainframe after hacking into the nsa servers and thus converting the capitalist scums of the USA to communists
+            after the user has emitted a videoSearch event
          */
-
-        // If chat is invisible, make it visible and make video results invisible
-        if (chatInput.getVisibility() == View.INVISIBLE ||chatScrollView.getVisibility() ==  View.INVISIBLE) {
-            videoResultsScrollView.setVisibility(View.INVISIBLE);
-            chatInput.setVisibility(View.VISIBLE);
-            chatScrollView.setVisibility(View.VISIBLE);
-            chatSendMessageButton.setVisibility(View.VISIBLE);
-        } else {
-            // Do the opposite of above
-            videoResultsScrollView.setVisibility(View.VISIBLE);
-            chatInput.setVisibility(View.INVISIBLE);
-            chatScrollView.setVisibility(View.INVISIBLE);
-            chatSendMessageButton.setVisibility(View.INVISIBLE);
+        try {
+            // The parent for all videos
+            LinearLayout mainLayout = findViewById(R.id.videoResultsContainer);
+            mainLayout.removeAllViews();
+            // Create all items for the rooms
+            for (int i = 0; i < results.length(); i++) {
+                final JSONObject room = results.getJSONObject(i);
+                final JSONObject snippet = room.getJSONObject("snippet");
+                // The inflater for the rooms to be displayed
+                View view = getLayoutInflater().inflate(R.layout.video_list_item, mainLayout, false);
+                // Set the title
+                TextView title = view.findViewById(R.id.listItemTitle);
+                title.setText(snippet.getString("title"));
+                // Set the thumbnail
+                ImageView thumbnail = view.findViewById(R.id.listItemThumbnail);
+                Picasso.get().load(snippet.getJSONObject("thumbnails").getJSONObject("high").getString("url")).into(thumbnail);
+                // Set onClickListener for redirecting user into room
+                view.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        toggleChatVideoVisibility();
+                        String id = null;
+                        try {
+                            id = room.getJSONObject("id").getString("videoId");
+                        } catch (JSONException e) {
+                            e.printStackTrace();
+                        }
+                        mSocket.emit("videoChange", id);
+                        youTubePlayer.loadVideo(id);
+                    }
+                });
+                mainLayout.addView(view);
+            }
+        } catch (JSONException e) {
+            e.printStackTrace();
         }
     }
 
+    void toggleChatVideoVisibility() {
+        /*
+            Toggles visibility of chat input field, chat scroll view and the video results scroll view.
+            This is a workaround because no Fragments were used, which is utterly retarded.
+         */
+
+        // If chat is invisible, make it visible and video results invisible
+        int videoResultsVisibility = (chatInput.getVisibility() == View.INVISIBLE || chatScrollView.getVisibility() ==  View.INVISIBLE) ? View.INVISIBLE : View.VISIBLE;
+        int chatVisibility = (videoResultsVisibility == View.INVISIBLE) ? View.VISIBLE : View.INVISIBLE;
+
+        videoResultsScrollView.setVisibility(videoResultsVisibility);
+        chatInput.setVisibility(chatVisibility);
+        chatScrollView.setVisibility(chatVisibility);
+        chatSendMessageButton.setVisibility(chatVisibility);
+    }
+
     void sendChatMessage(String message) {
-        /* Uses the socket to emit a chat message to all other users
+        /*
+            Emits a chat message to all other users via the websocket
          */
         mSocket.emit("newMessage", "Default", message);
-        /* For whatever reason the sent message is not being emitted back to us
-        We have to manually insert our message into the LinearLayout
+        /*
+            For whatever reason the sent message is not being emitted back to us
+            We have to manually insert our message into the LinearLayout
          */
         // Prepare message View to insert
         TextView messageTextView = new TextView(chatContainer.getContext());
-        messageTextView.setText("Me" + ": " + message);
+        messageTextView.setText("Me: " + message);
         messageTextView.setId(chatContainer.getChildCount() + 1);
         messageTextView.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -472,9 +476,10 @@ public class WatchActivity extends YouTubeBaseActivity {
     }
 
     void scrollChatToBottom() {
-        /* There is probably a more elegant solution to this
-        Whenever a new message is added to the bottom and it overflows the ScrollView,
-        we need to scroll to the bottom to make it visible
+        /*
+            There is probably a more elegant solution to this
+            Whenever a new message is added to the bottom and it overflows the ScrollView,
+            we need to scroll to the bottom to make it visible
          */
         chatScrollView.post(new Runnable() {
             @Override
