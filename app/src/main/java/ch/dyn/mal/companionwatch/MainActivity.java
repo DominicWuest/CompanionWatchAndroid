@@ -27,8 +27,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.Objects;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -104,20 +102,17 @@ public class MainActivity extends AppCompatActivity {
     // Displays all public rooms
     private void loadRooms() {
         // Get request on homepage for getting public rooms
-        StringRequest stringRequest = new StringRequest(Request.Method.GET, baseUrl, new Response.Listener<String>() {
+        StringRequest stringRequest = new StringRequest(Request.Method.GET, baseUrl + "/rooms", new Response.Listener<String>() {
             @Override
             public void onResponse(String response) {
                 // Get all rooms from the response
-                Pattern pattern = Pattern.compile("let rooms = (.*)[;\n]+");
-                Matcher matcher = pattern.matcher(response);
-                matcher.find();
                 JSONArray rooms;
                 try {
                     // The parent for all videos
                     LinearLayout mainLayout = findViewById(R.id.publicRoomsContainer);
                     mainLayout.removeAllViews();
                     // Create list elements
-                    rooms = new JSONArray(matcher.group(1));
+                    rooms = new JSONArray(response);
                     // Create text signaling that no rooms are available if that is the case
                     if (rooms.length() == 0) {
                         // Create the text view and set properties for it
